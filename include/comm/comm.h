@@ -4,6 +4,7 @@
 
 #include <sstream>
 #include <atomic>
+#include <type_traits>
 
 namespace comm {
     /**
@@ -53,14 +54,18 @@ namespace comm {
         static std::istringstream recvMessage(uint32_t typeId, int32_t srcId);
         static bool hasMessage(uint32_t typeId, int32_t srcId);
 
-        template <class Key>
+        template <class Type>
         inline static int getTypeId() {
+            static_assert(!std::is_pointer_v<Type>, "pointers not allowed");
+            static_assert(!std::is_reference_v<Type>, "references not allowed");
             static const int id = LastTypeId++;
             return id;
         }
     public:
         template<class Type>
         static uint32_t registerType() {
+            static_assert(!std::is_pointer_v<Type>, "pointers not allowed");
+            static_assert(!std::is_reference_v<Type>, "references not allowed");
             return getTypeId<Type>();
         }
 
