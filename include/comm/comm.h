@@ -3,6 +3,7 @@
 
 
 #include <sstream>
+#include <atomic>
 
 namespace comm {
     /**
@@ -44,10 +45,42 @@ namespace comm {
      * Thread safe routines
      */
     class Communicator {
+    private:
+        static std::atomic_int LastTypeId;
+
+    private:
+        static void sendMessage(uint32_t typeId, std::ostringstream &message, int32_t destId);
+        static std::istringstream recvMessage(uint32_t typeId, int32_t srcId);
+        static bool hasMessage(uint32_t typeId, int32_t srcId);
+
+        template <class Key>
+        inline static int getTypeId() {
+            static const int id = LastTypeId++;
+            return id;
+        }
     public:
-        static void sendMessage(std::ostringstream &message, int32_t destId);
-        static std::istringstream recvMessage(const std::string &varName, int32_t srcId);
-        static bool hasMessage(const std::string &varName, int32_t srcId);
+        template<class Type>
+        static uint32_t registerType() {
+            return getTypeId<Type>();
+        }
+
+        template<class Type>
+        static void sendMessage(std::ostringstream &message, int32_t destId) {
+            auto typeId = getTypeId<Type>();
+            sendMessage(typeId, message, destId);
+        }
+
+        template<class Type>
+        static std::istringstream recvMessage(int32_t srcId) {
+            auto typeId = getTypeId<Type>();
+            return recvMessage(typeId, srcId);
+        }
+
+        template<class Type>
+        static bool hasMessage(int32_t srcId) {
+            auto typeId = getTypeId<Type>();
+            return hasMessage(typeId, srcId);
+        }
     };
 }
 
