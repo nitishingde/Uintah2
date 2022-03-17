@@ -45,9 +45,37 @@ namespace comm {
      */
     class Communicator {
     public:
-        static void sendMessage(std::ostringstream &message, int32_t destId);
-        static std::istringstream recvMessage(const std::string &varName, int32_t srcId);
-        static bool hasMessage(const std::string &varName, int32_t srcId);
+        struct RecvData {
+            uint32_t id;
+            std::string serializedData;
+            uint32_t srcId;
+            explicit RecvData(uint32_t id, std::string serializedData, uint32_t srcId)
+                    : id(id), serializedData(serializedData), srcId(srcId) {}
+
+            RecvData(RecvData &&other) noexcept {
+                if(this == &other) return;
+                this->id = other.id;
+                this->serializedData = std::move(other.serializedData);
+                this->srcId = other.srcId;
+            }
+
+            RecvData& operator=(RecvData &&other) noexcept {
+                if(this == &other) return *this;
+                this->id = other.id;
+                this->serializedData = std::move(other.serializedData);
+                this->srcId = other.srcId;
+
+                return *this;
+            }
+        };
+
+        static void sendMessage(uint32_t id, std::ostringstream &message, int32_t destId);
+        static comm::Communicator::RecvData recvMessage();
+        static bool hasMessage();
+    };
+
+    struct RecvData {
+
     };
 }
 

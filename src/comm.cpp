@@ -54,11 +54,12 @@ namespace comm {
         };
 
         struct SendData {
+            uint32_t id;
             std::ostringstream buffer;
             MPI_Request request;
 
-            explicit SendData(std::ostringstream buffer, MPI_Request request)
-                    : buffer(std::move(buffer)), request(request) {}
+            explicit SendData(uint32_t id, std::ostringstream buffer, MPI_Request request)
+                    : id(id), buffer(std::move(buffer)), request(request) {}
 
             ~SendData() = default;
             SendData(SendData &other) = delete;
@@ -66,12 +67,14 @@ namespace comm {
 
             SendData(SendData &&other) noexcept {
                 if(this == &other) return;
+                this->id = other.id;
                 this->buffer = std::move(other.buffer);
                 this->request = other.request;
             }
 
             SendData& operator=(SendData &&other) noexcept {
                 if(this == &other) return *this;
+                this->id = other.id;
                 this->buffer = std::move(other.buffer);
                 this->request = other.request;
 
@@ -93,8 +96,8 @@ namespace comm {
         // recv related
         MPI_Win recvMetadataWindow;
         std::vector<uint32_t> recvMetadata_;// buffer for recvMetadataWindow
-        std::list<std::shared_ptr<RecvData>> recvTasks_;
-        std::vector<std::map<std::string, std::istringstream>> varLabels_;
+        std::list<std::shared_ptr<comm::DataWarehouse::RecvData>> recvTasks_;
+        std::queue<comm::Communicator::RecvData> varLabels_;
 
     private:
         DataWarehouse();
@@ -108,9 +111,9 @@ namespace comm {
         static DataWarehouse *getInstance();
         void startDaemon();
         void stopDaemon();
-        void sendMessage(std::ostringstream &message, int destId);
-        std::istringstream recvMessage(const std::string &varName, int srcId);
-        bool hasMessage(const std::string &varName, int srcId);
+        void sendMessage(uint32_t id, std::ostringstream &message, int destId);
+        comm::Communicator::RecvData recvMessage();
+        bool hasMessage();
     };
 }
 
@@ -133,7 +136,6 @@ void comm::DataWarehouse::init() {
     sendQueues_.resize(numNodes_);
     sendBufferSize_.resize(numNodes_, 0);
 
-    varLabels_.resize(numNodes_);
     recvMetadata_.resize(numNodes_, 0);
     MPI_Win_create(
             recvMetadata_.data(),
@@ -214,7 +216,7 @@ void comm::DataWarehouse::syncMessages() {
                     (int)recvData->buffer.size(),
                     MPI_CHAR,
                     node,
-                    nodeId_,
+                    MPI_ANY_TAG,
                     MPI_COMM_WORLD,
                     &recvData->request
             );
@@ -230,7 +232,7 @@ void comm::DataWarehouse::syncMessages() {
                     (int)sendData->buffer.str().size(),
                     MPI_CHAR,
                     node,
-                    node,
+                    sendData->id,
                     MPI_COMM_WORLD,
                     &sendData->request
             );
@@ -255,11 +257,7 @@ void comm::DataWarehouse::processSendsAndRecvs() {
         MPI_Test(&(*recvData)->request, &flag, &status);
         if(flag) {
             std::shared_ptr<RecvData> data = *recvData;
-            std::istringstream iss(data->buffer);
-            std::string name;
-            iss >> name;
-            iss.seekg(0);
-            varLabels_[data->srcId].insert(std::make_pair(std::move(name), std::move(iss)));
+            varLabels_.push(comm::Communicator::RecvData(status.MPI_TAG, std::move(data->buffer), data->srcId));
             recvData = recvTasks_.erase(recvData);
         }
     }
@@ -269,22 +267,25 @@ comm::DataWarehouse::~DataWarehouse() {
     pDataWarehouse = nullptr;
 }
 
-void comm::DataWarehouse::sendMessage(std::ostringstream &message, int destId) {
+void comm::DataWarehouse::sendMessage(uint32_t id, std::ostringstream &message, int32_t destId) {
     std::lock_guard lg(mutex_);
     sendQueues_[destId].emplace(std::make_shared<SendData>(
+            id,
             std::move(message),
             MPI_Request()
     ));
 }
 
-std::istringstream comm::DataWarehouse::recvMessage(const std::string &varName, int srcId) {
+comm::Communicator::RecvData comm::DataWarehouse::recvMessage() {
     std::lock_guard lg(mutex_);
-    return std::move(varLabels_[srcId].extract(varName).mapped());
+    auto ret = std::move(varLabels_.front());
+    varLabels_.pop();
+    return ret;
 }
 
-bool comm::DataWarehouse::hasMessage(const std::string &varName, int srcId) {
+bool comm::DataWarehouse::hasMessage() {
     std::lock_guard lg(mutex_);
-    return varLabels_[srcId].find(varName) != varLabels_[srcId].end();
+    return !varLabels_.empty();
 }
 
 static int32_t sIsMpiRootPid = -1;
@@ -343,14 +344,14 @@ const std::ostream& comm::VarLabel::serialize(std::ostream &oss) const {
     return oss;
 }
 
-void comm::Communicator::sendMessage(std::ostringstream &message, int32_t destId) {
-    comm::DataWarehouse::getInstance()->sendMessage(message, destId);
+void comm::Communicator::sendMessage(uint32_t id, std::ostringstream &message, int32_t destId) {
+    comm::DataWarehouse::getInstance()->sendMessage(id, message, destId);
 }
 
-std::istringstream comm::Communicator::recvMessage(const std::string &varName, int32_t srcId) {
-    return comm::DataWarehouse::getInstance()->recvMessage(varName, srcId);
+comm::Communicator::RecvData comm::Communicator::recvMessage() {
+    return std::move(comm::DataWarehouse::getInstance()->recvMessage());
 }
 
-bool comm::Communicator::hasMessage(const std::string &varName, int32_t srcId) {
-    return comm::DataWarehouse::getInstance()->hasMessage(varName, srcId);
+bool comm::Communicator::hasMessage() {
+    return comm::DataWarehouse::getInstance()->hasMessage();
 }
