@@ -113,7 +113,6 @@ namespace comm {
         MPI_Win recvMetadataWindow;
         std::vector<MetaDatum> recvMetadata_;// buffer for recvMetadataWindow
         std::list<std::shared_ptr<RecvData>> recvTasks_;
-        std::vector<std::map<uint32_t, comm::Communicator::RecvData>> varLabels_;
 
     private:
         DataWarehouse();
@@ -128,8 +127,6 @@ namespace comm {
         void startDaemon();
         void stopDaemon();
         void sendMessage(uint32_t typeId, std::ostringstream &message, int destId);
-        comm::Communicator::RecvData recvMessage(uint32_t typeId, int32_t srcId);
-        bool hasMessage(uint32_t typeId, int32_t srcId);
     };
 }
 
@@ -152,7 +149,6 @@ void comm::DataWarehouse::init() {
     sendQueues_.resize(numNodes_);
     sendMetadata_.resize(numNodes_);
 
-    varLabels_.resize(numNodes_);
     recvMetadata_.resize(numNodes_);
     MPI_Win_create(
             recvMetadata_.data(),
@@ -277,7 +273,12 @@ void comm::DataWarehouse::processSendsAndRecvs() {
         if(flag) {
             std::shared_ptr<RecvData> data = *recvData;
             std::istringstream iss(data->buffer);
-            varLabels_[data->srcId].insert(std::make_pair(data->id, comm::Communicator::RecvData(data->id, std::move(data->buffer), 1)));
+            printf("[Process %d] buffer = %s, id = %u\n", nodeId_, data->buffer.c_str(), data->id);
+            comm::Communicator::signal(std::make_shared<comm::Communicator::RecvData>(
+                    data->id,
+                    std::move(data->buffer),
+                    data->srcId
+            ));
             recvData = recvTasks_.erase(recvData);
         }
     }
@@ -294,31 +295,6 @@ void comm::DataWarehouse::sendMessage(uint32_t id, std::ostringstream &message, 
             std::move(message),
             MPI_Request()
     ));
-}
-
-comm::Communicator::RecvData comm::DataWarehouse::recvMessage(uint32_t id, int32_t srcId) {
-    std::lock_guard lg(mutex_);
-    if(srcId == ANY_SRC_NODE) {
-        for(auto &map: varLabels_) {
-            if(map.find(id) != map.end()) {
-                return std::move(map.extract(id).mapped());
-            }
-        }
-        //FIXME
-        return comm::Communicator::RecvData(-1, "", -1);
-    }
-    return std::move(varLabels_[srcId].extract(id).mapped());
-}
-
-bool comm::DataWarehouse::hasMessage(uint32_t id, int32_t srcId) {
-    std::lock_guard lg(mutex_);
-    if(srcId == ANY_SRC_NODE) {
-        for(auto &map: varLabels_) {
-            if(map.find(id) != map.end()) return true;
-        }
-        return false;
-    }
-    return varLabels_[srcId].find(id) != varLabels_[srcId].end();
 }
 
 static int32_t sIsMpiRootPid = -1;
@@ -381,10 +357,4 @@ void comm::Communicator::sendMessage(uint32_t id, std::ostringstream message, in
     comm::DataWarehouse::getInstance()->sendMessage(id, message, destId);
 }
 
-comm::Communicator::RecvData comm::Communicator::recvMessage(uint32_t id, int32_t srcId) {
-    return comm::DataWarehouse::getInstance()->recvMessage(id, srcId);
-}
-
-bool comm::Communicator::hasMessage(uint32_t id, int32_t srcId) {
-    return comm::DataWarehouse::getInstance()->hasMessage(id, srcId);
-}
+sigslot::signal<std::shared_ptr<comm::Communicator::RecvData>> comm::Communicator::signal {};

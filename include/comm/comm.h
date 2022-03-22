@@ -3,6 +3,7 @@
 
 
 #include <sstream>
+#include "sigslot/signal.hpp"
 
 #define ANY_SRC_NODE -1
 
@@ -71,9 +72,8 @@ namespace comm {
             }
         };
 
+        static sigslot::signal<std::shared_ptr<comm::Communicator::RecvData>> signal;
         static void sendMessage(uint32_t id, std::ostringstream message, int32_t destId);
-        static comm::Communicator::RecvData recvMessage(uint32_t id, int32_t srcId = ANY_SRC_NODE);
-        static bool hasMessage(uint32_t id, int32_t srcId = ANY_SRC_NODE);
     };
 }
 
