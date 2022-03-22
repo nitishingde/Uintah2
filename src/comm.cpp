@@ -11,6 +11,19 @@
 #include <thread>
 
 namespace comm {
+    struct MetaDatum {
+    private:
+        uint32_t metaData_[2] = {0};
+    public:
+        MetaDatum() = default;
+        void setBufferSize(uint32_t size) { metaData_[0] = size; }
+        uint32_t getBufferSize() { return metaData_[0]; }
+        void setTypeId(uint32_t typeId) { metaData_[1] = typeId; }
+        uint32_t getTypeId() { return metaData_[1]; }
+        void reset() { metaData_[0] = 0; metaData_[1] = 0; }
+        uint32_t* data() { return metaData_; }
+    };
+
     /**
      * Handles all the sends/recvs logic
      * A daemon thread is spawned to run in the background
@@ -25,12 +38,13 @@ namespace comm {
     class DataWarehouse {
     private:
         struct RecvData {
+            uint32_t id;
             std::string buffer;
             int32_t srcId;
             MPI_Request request;
 
-            explicit RecvData(std::string buffer, int32_t srcId, MPI_Request request)
-                    : buffer(std::move(buffer)), srcId(srcId), request(request) {}
+            explicit RecvData(uint32_t id, std::string buffer, int32_t srcId, MPI_Request request)
+                    : id(id), buffer(std::move(buffer)), srcId(srcId), request(request) {}
 
             ~RecvData() = default;
             RecvData(RecvData &other) = delete;
@@ -38,6 +52,7 @@ namespace comm {
 
             RecvData(RecvData &&other) noexcept {
                 if (this == &other) return;
+                this->id = other.id;
                 this->buffer = std::move(other.buffer);
                 this->srcId = other.srcId;
                 this->request = other.request;
@@ -45,6 +60,7 @@ namespace comm {
 
             RecvData& operator=(RecvData &&other) noexcept {
                 if (this == &other) return *this;
+                this->id = other.id;
                 this->buffer = std::move(other.buffer);
                 this->srcId = other.srcId;
                 this->request = other.request;
@@ -54,11 +70,12 @@ namespace comm {
         };
 
         struct SendData {
+            uint32_t id;
             std::ostringstream buffer;
             MPI_Request request;
 
-            explicit SendData(std::ostringstream buffer, MPI_Request request)
-                    : buffer(std::move(buffer)), request(request) {}
+            explicit SendData(uint32_t id, std::ostringstream buffer, MPI_Request request)
+                    : id(id), buffer(std::move(buffer)), request(request) {}
 
             ~SendData() = default;
             SendData(SendData &other) = delete;
@@ -66,12 +83,14 @@ namespace comm {
 
             SendData(SendData &&other) noexcept {
                 if(this == &other) return;
+                this->id = other.id;
                 this->buffer = std::move(other.buffer);
                 this->request = other.request;
             }
 
             SendData& operator=(SendData &&other) noexcept {
                 if(this == &other) return *this;
+                this->id = other.id;
                 this->buffer = std::move(other.buffer);
                 this->request = other.request;
 
@@ -87,14 +106,14 @@ namespace comm {
 
         // send related
         std::vector<std::queue<std::shared_ptr<SendData>>> sendQueues_;
-        std::vector<uint32_t> sendBufferSize_;
+        std::vector<MetaDatum> sendMetadata_;
         std::list<std::shared_ptr<SendData>> sendTasks_;
 
         // recv related
         MPI_Win recvMetadataWindow;
-        std::vector<uint32_t> recvMetadata_;// buffer for recvMetadataWindow
+        std::vector<MetaDatum> recvMetadata_;// buffer for recvMetadataWindow
         std::list<std::shared_ptr<RecvData>> recvTasks_;
-        std::vector<std::map<std::string, std::istringstream>> varLabels_;
+        std::vector<std::map<uint32_t, comm::Communicator::RecvData>> varLabels_;
 
     private:
         DataWarehouse();
@@ -108,9 +127,9 @@ namespace comm {
         static DataWarehouse *getInstance();
         void startDaemon();
         void stopDaemon();
-        void sendMessage(std::ostringstream &message, int destId);
-        std::istringstream recvMessage(const std::string &varName, int srcId);
-        bool hasMessage(const std::string &varName, int srcId);
+        void sendMessage(uint32_t typeId, std::ostringstream &message, int destId);
+        comm::Communicator::RecvData recvMessage(uint32_t typeId, int32_t srcId);
+        bool hasMessage(uint32_t typeId, int32_t srcId);
     };
 }
 
@@ -131,10 +150,10 @@ comm::DataWarehouse::DataWarehouse() {
 
 void comm::DataWarehouse::init() {
     sendQueues_.resize(numNodes_);
-    sendBufferSize_.resize(numNodes_, 0);
+    sendMetadata_.resize(numNodes_);
 
     varLabels_.resize(numNodes_);
-    recvMetadata_.resize(numNodes_, 0);
+    recvMetadata_.resize(numNodes_);
     MPI_Win_create(
             recvMetadata_.data(),
             MPI_Aint(recvMetadata_.size() * sizeof(decltype(recvMetadata_)::value_type)),
@@ -182,15 +201,16 @@ void comm::DataWarehouse::syncMetadata() {
     for(int32_t node = 0; node < numNodes_; ++node) {
         if(sendQueues_[node].empty()) continue;
 
-        sendBufferSize_[node] = sendQueues_[node].front()->buffer.str().size();
-        if(sendBufferSize_[node]) {//FIXME: unnecessary?
+        sendMetadata_[node].setBufferSize(sendQueues_[node].front()->buffer.str().size());
+        sendMetadata_[node].setTypeId(sendQueues_[node].front()->id);
+        if(sendMetadata_[node].getBufferSize()) {//FIXME: unnecessary?
             MPI_Put(
-                    &sendBufferSize_[node],
-                    1,
+                    sendMetadata_.data(),
+                    2,
                     MPI_UINT32_T,
                     node,
                     nodeId_,
-                    1,
+                    2,
                     MPI_UINT32_T,
                     recvMetadataWindow
             );
@@ -201,9 +221,10 @@ void comm::DataWarehouse::syncMetadata() {
 
 void comm::DataWarehouse::syncMessages() {
     for(int32_t node = 0; node < numNodes_; ++node) {
-        if(recvMetadata_[node]) {
+        if(recvMetadata_[node].getBufferSize()) {
             auto recvData = std::make_shared<RecvData>(
-                    std::string(recvMetadata_[node], ' '),
+                    recvMetadata_[node].getTypeId(),
+                    std::string(recvMetadata_[node].getBufferSize(), ' '),
                     node,
                     MPI_Request()
             );
@@ -214,11 +235,11 @@ void comm::DataWarehouse::syncMessages() {
                     (int)recvData->buffer.size(),
                     MPI_CHAR,
                     node,
-                    nodeId_,
+                    MPI_ANY_TAG,
                     MPI_COMM_WORLD,
                     &recvData->request
             );
-            recvMetadata_[node] = 0;
+            recvMetadata_[node].reset();
         }
 
         if(!sendQueues_[node].empty()) {
@@ -230,11 +251,11 @@ void comm::DataWarehouse::syncMessages() {
                     (int)sendData->buffer.str().size(),
                     MPI_CHAR,
                     node,
-                    node,
+                    nodeId_,
                     MPI_COMM_WORLD,
                     &sendData->request
             );
-            sendBufferSize_[node] = 0;
+            sendMetadata_[node].reset();
         }
     }
 }
@@ -256,10 +277,7 @@ void comm::DataWarehouse::processSendsAndRecvs() {
         if(flag) {
             std::shared_ptr<RecvData> data = *recvData;
             std::istringstream iss(data->buffer);
-            std::string name;
-            iss >> name;
-            iss.seekg(0);
-            varLabels_[data->srcId].insert(std::make_pair(std::move(name), std::move(iss)));
+            varLabels_[data->srcId].insert(std::make_pair(data->id, comm::Communicator::RecvData(data->id, std::move(data->buffer), 1)));
             recvData = recvTasks_.erase(recvData);
         }
     }
@@ -269,22 +287,38 @@ comm::DataWarehouse::~DataWarehouse() {
     pDataWarehouse = nullptr;
 }
 
-void comm::DataWarehouse::sendMessage(std::ostringstream &message, int destId) {
+void comm::DataWarehouse::sendMessage(uint32_t id, std::ostringstream &message, int32_t destId) {
     std::lock_guard lg(mutex_);
     sendQueues_[destId].emplace(std::make_shared<SendData>(
+            id,
             std::move(message),
             MPI_Request()
     ));
 }
 
-std::istringstream comm::DataWarehouse::recvMessage(const std::string &varName, int srcId) {
+comm::Communicator::RecvData comm::DataWarehouse::recvMessage(uint32_t id, int32_t srcId) {
     std::lock_guard lg(mutex_);
-    return std::move(varLabels_[srcId].extract(varName).mapped());
+    if(srcId == ANY_SRC_NODE) {
+        for(auto &map: varLabels_) {
+            if(map.find(id) != map.end()) {
+                return std::move(map.extract(id).mapped());
+            }
+        }
+        //FIXME
+        return comm::Communicator::RecvData(-1, "", -1);
+    }
+    return std::move(varLabels_[srcId].extract(id).mapped());
 }
 
-bool comm::DataWarehouse::hasMessage(const std::string &varName, int srcId) {
+bool comm::DataWarehouse::hasMessage(uint32_t id, int32_t srcId) {
     std::lock_guard lg(mutex_);
-    return varLabels_[srcId].find(varName) != varLabels_[srcId].end();
+    if(srcId == ANY_SRC_NODE) {
+        for(auto &map: varLabels_) {
+            if(map.find(id) != map.end()) return true;
+        }
+        return false;
+    }
+    return varLabels_[srcId].find(id) != varLabels_[srcId].end();
 }
 
 static int32_t sIsMpiRootPid = -1;
@@ -343,14 +377,14 @@ const std::ostream& comm::VarLabel::serialize(std::ostream &oss) const {
     return oss;
 }
 
-void comm::Communicator::sendMessage(std::ostringstream &message, int32_t destId) {
-    comm::DataWarehouse::getInstance()->sendMessage(message, destId);
+void comm::Communicator::sendMessage(uint32_t id, std::ostringstream message, int32_t destId) {
+    comm::DataWarehouse::getInstance()->sendMessage(id, message, destId);
 }
 
-std::istringstream comm::Communicator::recvMessage(const std::string &varName, int32_t srcId) {
-    return comm::DataWarehouse::getInstance()->recvMessage(varName, srcId);
+comm::Communicator::RecvData comm::Communicator::recvMessage(uint32_t id, int32_t srcId) {
+    return comm::DataWarehouse::getInstance()->recvMessage(id, srcId);
 }
 
-bool comm::Communicator::hasMessage(const std::string &varName, int32_t srcId) {
-    return comm::DataWarehouse::getInstance()->hasMessage(varName, srcId);
+bool comm::Communicator::hasMessage(uint32_t id, int32_t srcId) {
+    return comm::DataWarehouse::getInstance()->hasMessage(id, srcId);
 }

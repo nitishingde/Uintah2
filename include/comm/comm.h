@@ -4,6 +4,8 @@
 
 #include <sstream>
 
+#define ANY_SRC_NODE -1
+
 namespace comm {
     /**
      * TODO: All thread safe I think, need to confirm
@@ -45,9 +47,33 @@ namespace comm {
      */
     class Communicator {
     public:
-        static void sendMessage(std::ostringstream &message, int32_t destId);
-        static std::istringstream recvMessage(const std::string &varName, int32_t srcId);
-        static bool hasMessage(const std::string &varName, int32_t srcId);
+        struct RecvData {
+            uint32_t id;
+            std::string serializedData;
+            uint32_t srcId;
+            explicit RecvData(uint32_t id_, std::string serializedData_, uint32_t srcId_)
+                    : id(id_), serializedData(std::move(serializedData_)), srcId(srcId_) {}
+
+            RecvData(RecvData &&other) noexcept {
+                if(this == &other) return;
+                this->id = other.id;
+                this->serializedData = std::move(other.serializedData);
+                this->srcId = other.srcId;
+            }
+
+            RecvData& operator=(RecvData &&other) noexcept {
+                if(this == &other) return *this;
+                this->id = other.id;
+                this->serializedData = std::move(other.serializedData);
+                this->srcId = other.srcId;
+
+                return *this;
+            }
+        };
+
+        static void sendMessage(uint32_t id, std::ostringstream message, int32_t destId);
+        static comm::Communicator::RecvData recvMessage(uint32_t id, int32_t srcId = ANY_SRC_NODE);
+        static bool hasMessage(uint32_t id, int32_t srcId = ANY_SRC_NODE);
     };
 }
 
