@@ -273,7 +273,6 @@ void comm::DataWarehouse::processSendsAndRecvs() {
         if(flag) {
             std::shared_ptr<RecvData> data = *recvData;
             std::istringstream iss(data->buffer);
-            printf("[Process %d] buffer = %s, id = %u\n", nodeId_, data->buffer.c_str(), data->id);
             comm::Communicator::signal(std::make_shared<comm::Communicator::RecvData>(
                     data->id,
                     std::move(data->buffer),
