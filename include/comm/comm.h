@@ -62,7 +62,12 @@ namespace comm {
 
     /**
      * A way to send and receive data over network of clusters
+     *
+     * Need to register a callback (signal) to get notified on incoming comm messages.
+     * Also has a static member function to send comm message to a single node.
      * Thread safe routines
+     *
+     * TODO: broadcast, reduction
      */
     class Communicator {
     public:
