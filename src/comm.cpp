@@ -345,13 +345,6 @@ comm::MPI_GlobalLockGuard::~MPI_GlobalLockGuard() {
     }
 }
 
-comm::VarLabel::VarLabel(std::string name) : name_(std::move(name)) {}
-
-const std::ostream& comm::VarLabel::serialize(std::ostream &oss) const {
-    oss << name_ << " ";
-    return oss;
-}
-
 void comm::Communicator::sendMessage(uint32_t id, std::ostringstream message, int32_t destId) {
     comm::DataWarehouse::getInstance()->sendMessage(id, message, destId);
 }

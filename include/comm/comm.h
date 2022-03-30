@@ -30,19 +30,6 @@ namespace comm {
     };
 
     /**
-     * An abstract class for serialising/deserialising objects to send using comm::Communicator
-     * Do we need it right now? Not really.
-     * Future purpose: A way to declare global variables (i.e. scoped over the cluster)
-     */
-    class VarLabel {
-    public:
-        std::string name_;
-        explicit VarLabel(std::string name);
-        ~VarLabel() = default;
-        virtual const std::ostream& serialize(std::ostream &oss) const;
-    };
-
-    /**
      * A way to send and receive data over network of clusters
      * Thread safe routines
      */
