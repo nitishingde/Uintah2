@@ -30,36 +30,43 @@ namespace comm {
     };
 
     /**
+     * Comm Packet is similar to IPv4 Packet Header
+     *
+     * Similar to a IPv4 packet header, CommPacket has header fields like id (packet identifier) and srcId (source node)
+     * and a data field called serializedData.
+     */
+    struct CommPacket {
+        uint32_t id;
+        std::string serializedData;
+        uint32_t srcId;
+
+        explicit CommPacket(uint32_t id_, std::string serializedData_, uint32_t srcId_)
+                : id(id_), serializedData(std::move(serializedData_)), srcId(srcId_) {}
+
+        CommPacket(CommPacket &&other) noexcept {
+            if(this == &other) return;
+            this->id = other.id;
+            this->serializedData = std::move(other.serializedData);
+            this->srcId = other.srcId;
+        }
+
+        CommPacket& operator=(CommPacket &&other) noexcept {
+            if(this == &other) return *this;
+            this->id = other.id;
+            this->serializedData = std::move(other.serializedData);
+            this->srcId = other.srcId;
+
+            return *this;
+        }
+    };
+
+    /**
      * A way to send and receive data over network of clusters
      * Thread safe routines
      */
     class Communicator {
     public:
-        struct RecvData {
-            uint32_t id;
-            std::string serializedData;
-            uint32_t srcId;
-            explicit RecvData(uint32_t id_, std::string serializedData_, uint32_t srcId_)
-                    : id(id_), serializedData(std::move(serializedData_)), srcId(srcId_) {}
-
-            RecvData(RecvData &&other) noexcept {
-                if(this == &other) return;
-                this->id = other.id;
-                this->serializedData = std::move(other.serializedData);
-                this->srcId = other.srcId;
-            }
-
-            RecvData& operator=(RecvData &&other) noexcept {
-                if(this == &other) return *this;
-                this->id = other.id;
-                this->serializedData = std::move(other.serializedData);
-                this->srcId = other.srcId;
-
-                return *this;
-            }
-        };
-
-        static sigslot::signal<std::shared_ptr<comm::Communicator::RecvData>> signal;
+        static sigslot::signal<std::shared_ptr<comm::CommPacket>> signal;
         static void sendMessage(uint32_t id, std::ostringstream message, int32_t destId);
     };
 }
