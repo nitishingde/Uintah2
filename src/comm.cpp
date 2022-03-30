@@ -273,7 +273,7 @@ void comm::DataWarehouse::processSendsAndRecvs() {
         if(flag) {
             std::shared_ptr<RecvData> data = *recvData;
             std::istringstream iss(data->buffer);
-            comm::Communicator::signal(std::make_shared<comm::CommPacket>(
+            comm::Communicator::signal.emit(std::make_shared<comm::CommPacket>(
                     data->id,
                     std::move(data->buffer),
                     data->srcId
@@ -349,4 +349,4 @@ void comm::Communicator::sendMessage(uint32_t id, std::ostringstream message, in
     comm::DataWarehouse::getInstance()->sendMessage(id, message, destId);
 }
 
-sigslot::signal<std::shared_ptr<comm::CommPacket>> comm::Communicator::signal {};
+comm::Signal comm::Communicator::signal {};

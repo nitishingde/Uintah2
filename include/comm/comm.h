@@ -2,8 +2,10 @@
 #define UINTAH2_COMM_H
 
 
+#include <functional>
+#include <memory>
+#include <mutex>
 #include <sstream>
-#include "sigslot/signal.hpp"
 
 #define ANY_SRC_NODE -1
 
@@ -61,6 +63,56 @@ namespace comm {
     };
 
     /**
+     * Simple/dumb signal slot implementation intended just for Comm
+     * Only 1 slot can be connected/registered
+     * Connecting multiple slots throws an error
+     * Thread safe routines
+     *
+     * FIXME: use unique_ptr instead of shared_ptr?
+    */
+    class Signal {
+    private:
+        using SignalType = std::shared_ptr<comm::CommPacket>;
+        std::function<void(SignalType)> slot_;
+        std::mutex mutex_ {};
+
+    public:
+        Signal() = default;
+
+        ~Signal() {
+            disconnect();
+        }
+
+        void connect(std::function<void(SignalType)> slot) {
+            std::lock_guard lockGuard(mutex_);
+            if(slot_ != nullptr) {
+                throw std::runtime_error("Slot is already occupied.");
+            }
+            slot_ = std::move(slot);
+        }
+
+        template<class T>
+        void connect(void(T::*memberFunction)(SignalType), T *pObject) {
+            connect(std::bind(memberFunction, pObject, std::placeholders::_1));
+        }
+
+        void disconnect() {
+            std::lock_guard lockGuard(mutex_);
+            slot_ = nullptr;
+        }
+
+        void emit(SignalType signal) {
+            std::lock_guard lockGuard(mutex_);
+            slot_(std::move(signal));
+        }
+
+        bool empty() {
+            std::lock_guard lockGuard(mutex_);
+            return slot_ == nullptr;
+        }
+    };
+
+    /**
      * A way to send and receive data over network of clusters
      *
      * Need to register a callback (signal) to get notified on incoming comm messages.
@@ -71,7 +123,7 @@ namespace comm {
      */
     class Communicator {
     public:
-        static sigslot::signal<std::shared_ptr<comm::CommPacket>> signal;
+        static comm::Signal signal;
         static void sendMessage(uint32_t id, std::ostringstream message, int32_t destId);
     };
 }
