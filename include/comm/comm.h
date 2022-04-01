@@ -42,8 +42,8 @@ namespace comm {
         std::string serializedData;
         uint32_t srcId;
 
-        explicit CommPacket(uint32_t id_, std::string serializedData_, uint32_t srcId_)
-                : id(id_), serializedData(std::move(serializedData_)), srcId(srcId_) {}
+        explicit CommPacket(uint32_t id_, std::string &&serializedData_, uint32_t srcId_)
+                : id(id_), serializedData(serializedData_), srcId(srcId_) {}
 
         CommPacket(CommPacket &&other) noexcept {
             if(this == &other) return;
@@ -124,7 +124,7 @@ namespace comm {
     class Communicator {
     public:
         static comm::Signal signal;
-        static void sendMessage(uint32_t id, std::ostringstream message, int32_t destId);
+        static void sendMessage(uint32_t id, std::string &&message, int32_t destId);
     };
 }
 

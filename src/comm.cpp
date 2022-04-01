@@ -4,7 +4,6 @@
 #include "comm/comm.h"
 #include <atomic>
 #include <list>
-#include <map>
 #include <mpi.h>
 #include <mutex>
 #include <queue>
@@ -71,10 +70,10 @@ namespace comm {
 
         struct SendData {
             uint32_t id;
-            std::ostringstream buffer;
+            std::string buffer;
             MPI_Request request;
 
-            explicit SendData(uint32_t id, std::ostringstream buffer, MPI_Request request)
+            explicit SendData(uint32_t id, std::string &&buffer, MPI_Request request)
                     : id(id), buffer(std::move(buffer)), request(request) {}
 
             ~SendData() = default;
@@ -126,7 +125,7 @@ namespace comm {
         static DataWarehouse *getInstance();
         void startDaemon();
         void stopDaemon();
-        void sendMessage(uint32_t typeId, std::ostringstream &message, int destId);
+        void sendMessage(uint32_t typeId, std::string &&message, int destId);
     };
 }
 
@@ -197,7 +196,7 @@ void comm::DataWarehouse::syncMetadata() {
     for(int32_t node = 0; node < numNodes_; ++node) {
         if(sendQueues_[node].empty()) continue;
 
-        sendMetadata_[node].setBufferSize(sendQueues_[node].front()->buffer.str().size());
+        sendMetadata_[node].setBufferSize(sendQueues_[node].front()->buffer.size());
         sendMetadata_[node].setTypeId(sendQueues_[node].front()->id);
         if(sendMetadata_[node].getBufferSize()) {//FIXME: unnecessary?
             MPI_Put(
@@ -220,7 +219,7 @@ void comm::DataWarehouse::syncMessages() {
         if(recvMetadata_[node].getBufferSize()) {
             auto recvData = std::make_shared<RecvData>(
                     recvMetadata_[node].getTypeId(),
-                    std::string(recvMetadata_[node].getBufferSize(), ' '),
+                    std::string(recvMetadata_[node].getBufferSize(), 0),
                     node,
                     MPI_Request()
             );
@@ -243,8 +242,8 @@ void comm::DataWarehouse::syncMessages() {
             sendQueues_[node].pop();
             sendTasks_.emplace_back(sendData);
             MPI_Isend(
-                    sendData->buffer.str().data(),
-                    (int)sendData->buffer.str().size(),
+                    sendData->buffer.data(),
+                    (int)sendData->buffer.size(),
                     MPI_CHAR,
                     node,
                     nodeId_,
@@ -287,7 +286,7 @@ comm::DataWarehouse::~DataWarehouse() {
     pDataWarehouse = nullptr;
 }
 
-void comm::DataWarehouse::sendMessage(uint32_t id, std::ostringstream &message, int32_t destId) {
+void comm::DataWarehouse::sendMessage(uint32_t id, std::string &&message, int32_t destId) {
     std::lock_guard lg(mutex_);
     sendQueues_[destId].emplace(std::make_shared<SendData>(
             id,
@@ -345,8 +344,8 @@ comm::MPI_GlobalLockGuard::~MPI_GlobalLockGuard() {
     }
 }
 
-void comm::Communicator::sendMessage(uint32_t id, std::ostringstream message, int32_t destId) {
-    comm::DataWarehouse::getInstance()->sendMessage(id, message, destId);
+void comm::Communicator::sendMessage(uint32_t id, std::string &&message, int32_t destId) {
+    comm::DataWarehouse::getInstance()->sendMessage(id, std::move(message), destId);
 }
 
 comm::Signal comm::Communicator::signal {};
