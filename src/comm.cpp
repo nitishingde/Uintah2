@@ -201,7 +201,7 @@ void comm::DataWarehouse::syncMetadata() {
         sendMetadata_[node].setTypeId(sendQueues_[node].front()->id);
         if(sendMetadata_[node].getBufferSize()) {//FIXME: unnecessary?
             MPI_Put(
-                    sendMetadata_.data(),
+                    sendMetadata_[node].data(),
                     2,
                     MPI_UINT32_T,
                     node,
