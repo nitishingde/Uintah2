@@ -2,28 +2,35 @@
 // Created by ngs on 2/16/22.
 //
 
-#include <stdlib.h>
-
 #include "comm/comm.h"
+#include <atomic>
 #include <chrono>
 #include <thread>
 
-class CommData: public comm::VarLabel {
+class Serialization {
+private:
+public:
+    Serialization() = default;
+    virtual ~Serialization() = default;
+    [[nodiscard]] virtual std::string serialize() const = 0;
+    virtual void deserialize(std::istream&&) = 0;
+};
+
+class CommData: public Serialization {
 public:
     int32_t data;
+    std::string name;
 
-    explicit CommData(std::string name, int32_t data) : comm::VarLabel(std::move(name)), data(data) {}
-    std::ostream &serialize(std::ostream &ostream) const override {
-        comm::VarLabel::serialize(ostream);
-        ostream << data;
-        return ostream;
+    explicit CommData(std::string name = "", int32_t data = -1) : name(std::move(name)), data(data) {}
+
+    [[nodiscard]] std::string serialize() const override {
+        std::ostringstream oss;
+        oss << name << ' ' << data;
+        return oss.str();
     }
 
-    static CommData deserialize(std::istringstream istream) {
-        std::string name;
-        int32_t data;
+    void deserialize(std::istream &&istream) override {
         istream >> name >> data;
-        return CommData(name, data);
     };
 };
 
@@ -44,21 +51,22 @@ int main(int argc, char* argv[]) {
     auto nodeId = comm::getMpiNodeId();
     auto numNodes = comm::getMpiNumNodes();
 
-    int32_t srcId = (numNodes+nodeId-1)%numNodes;
+//    int32_t srcId = (numNodes+nodeId-1)%numNodes;
     int32_t destId = (nodeId+1)%numNodes;
 
-    auto send = CommData("nodeId" + std::to_string(nodeId), nodeId);
-    auto oss = std::ostringstream();
-    send.serialize(oss);
-    comm::Communicator::sendMessage(oss, destId);
+    std::atomic_bool canExit = false;
+    comm::Communicator::signal.connect([&canExit, &nodeId](const std::shared_ptr<comm::CommPacket>& commPacket) {
+        auto data = std::make_shared<CommData>();
+        data->deserialize(std::istringstream(commPacket->serializedData));
+        printf("[Process %d] receiving {data = %d, name = %s} from srcNode %d\n", nodeId, data->data, data->name.c_str(), commPacket->srcId);
+        std::atomic_store(&canExit, true);
+    });
 
-    auto recvVarName = "nodeId" + std::to_string(srcId);
-    while(!comm::Communicator::hasMessage(recvVarName, srcId)) {
-        using namespace std::chrono_literals;
-        std::this_thread::sleep_for(100ms);
-    }
-    auto recv = CommData::deserialize(comm::Communicator::recvMessage(recvVarName, srcId));
-    printf("[Process %d] data = %d\n", nodeId, recv.data);
+    auto send = CommData("nodeId" + std::to_string(nodeId), nodeId);
+    comm::Communicator::sendMessage(typeid(CommData).hash_code(),  send.serialize(), destId);
+    printf("[Process %d] %d --> %d\n", nodeId, nodeId, destId);
+
+    while(!std::atomic_load(&canExit)) {}
 
     return EXIT_SUCCESS;
 }
