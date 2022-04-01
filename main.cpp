@@ -58,7 +58,7 @@ int main(int argc, char* argv[]) {
     comm::Communicator::signal.connect([&canExit, &nodeId](const std::shared_ptr<comm::CommPacket>& commPacket) {
         auto data = std::make_shared<CommData>();
         data->deserialize(std::istringstream(commPacket->serializedData));
-        printf("[Process %d] receiving {data = %d, name = %s} from srcNode %d\n", nodeId, data->data, data->name.c_str(), commPacket->srcId);
+        printf("[Process %d] receiving {data = %d, name = %s} from srcNode %d\n", nodeId, data->data, data->name.c_str(), commPacket->otherNode);
         std::atomic_store(&canExit, true);
     });
 

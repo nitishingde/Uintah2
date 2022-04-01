@@ -36,61 +36,26 @@ namespace comm {
      */
     class DataWarehouse {
     private:
-        struct RecvData {
-            uint32_t id;
-            std::string buffer;
-            int32_t srcId;
+        struct CommPacketMPIWrapper {
+            std::shared_ptr<comm::CommPacket> commPacket;
             MPI_Request request;
 
-            explicit RecvData(uint32_t id, std::string buffer, int32_t srcId, MPI_Request request)
-                    : id(id), buffer(std::move(buffer)), srcId(srcId), request(request) {}
+            explicit CommPacketMPIWrapper(uint32_t id, std::string buffer, int32_t otherNode, MPI_Request request)
+                    : commPacket(std::make_shared<comm::CommPacket>(id, std::move(buffer), otherNode)), request(request) {}
 
-            ~RecvData() = default;
-            RecvData(RecvData &other) = delete;
-            RecvData& operator=(RecvData &other) = delete;
+            ~CommPacketMPIWrapper() = default;
+            CommPacketMPIWrapper(CommPacketMPIWrapper &other) = delete;
+            CommPacketMPIWrapper& operator=(CommPacketMPIWrapper &other) = delete;
 
-            RecvData(RecvData &&other) noexcept {
+            CommPacketMPIWrapper(CommPacketMPIWrapper &&other) noexcept {
                 if (this == &other) return;
-                this->id = other.id;
-                this->buffer = std::move(other.buffer);
-                this->srcId = other.srcId;
+                this->commPacket = std::move(other.commPacket);
                 this->request = other.request;
             }
 
-            RecvData& operator=(RecvData &&other) noexcept {
+            CommPacketMPIWrapper& operator=(CommPacketMPIWrapper &&other) noexcept {
                 if (this == &other) return *this;
-                this->id = other.id;
-                this->buffer = std::move(other.buffer);
-                this->srcId = other.srcId;
-                this->request = other.request;
-
-                return *this;
-            }
-        };
-
-        struct SendData {
-            uint32_t id;
-            std::string buffer;
-            MPI_Request request;
-
-            explicit SendData(uint32_t id, std::string &&buffer, MPI_Request request)
-                    : id(id), buffer(std::move(buffer)), request(request) {}
-
-            ~SendData() = default;
-            SendData(SendData &other) = delete;
-            SendData& operator=(SendData &other) = delete;
-
-            SendData(SendData &&other) noexcept {
-                if(this == &other) return;
-                this->id = other.id;
-                this->buffer = std::move(other.buffer);
-                this->request = other.request;
-            }
-
-            SendData& operator=(SendData &&other) noexcept {
-                if(this == &other) return *this;
-                this->id = other.id;
-                this->buffer = std::move(other.buffer);
+                this->commPacket = std::move(other.commPacket);
                 this->request = other.request;
 
                 return *this;
@@ -104,14 +69,14 @@ namespace comm {
         std::atomic_int32_t stopDaemon_ = false;
 
         // send related
-        std::vector<std::queue<std::shared_ptr<SendData>>> sendQueues_;
+        std::vector<std::queue<std::shared_ptr<CommPacketMPIWrapper>>> sendQueues_;
         std::vector<MetaDatum> sendMetadata_;
-        std::list<std::shared_ptr<SendData>> sendTasks_;
+        std::list<std::shared_ptr<CommPacketMPIWrapper>> sendTasks_;
 
         // recv related
         MPI_Win recvMetadataWindow;
         std::vector<MetaDatum> recvMetadata_;// buffer for recvMetadataWindow
-        std::list<std::shared_ptr<RecvData>> recvTasks_;
+        std::list<std::shared_ptr<CommPacketMPIWrapper>> recvTasks_;
 
     private:
         DataWarehouse();
@@ -196,8 +161,9 @@ void comm::DataWarehouse::syncMetadata() {
     for(int32_t node = 0; node < numNodes_; ++node) {
         if(sendQueues_[node].empty()) continue;
 
-        sendMetadata_[node].setBufferSize(sendQueues_[node].front()->buffer.size());
-        sendMetadata_[node].setTypeId(sendQueues_[node].front()->id);
+        auto sendData = sendQueues_[node].front();
+        sendMetadata_[node].setBufferSize(sendData->commPacket->serializedData.size());
+        sendMetadata_[node].setTypeId(sendData->commPacket->id);
         if(sendMetadata_[node].getBufferSize()) {//FIXME: unnecessary?
             MPI_Put(
                     sendMetadata_[node].data(),
@@ -217,7 +183,7 @@ void comm::DataWarehouse::syncMetadata() {
 void comm::DataWarehouse::syncMessages() {
     for(int32_t node = 0; node < numNodes_; ++node) {
         if(recvMetadata_[node].getBufferSize()) {
-            auto recvData = std::make_shared<RecvData>(
+            auto recvData = std::make_shared<CommPacketMPIWrapper>(
                     recvMetadata_[node].getTypeId(),
                     std::string(recvMetadata_[node].getBufferSize(), 0),
                     node,
@@ -226,8 +192,8 @@ void comm::DataWarehouse::syncMessages() {
             recvTasks_.emplace_back(recvData);
 
             MPI_Irecv(
-                    recvData->buffer.data(),
-                    (int)recvData->buffer.size(),
+                    recvData->commPacket->serializedData.data(),
+                    (int)recvData->commPacket->serializedData.size(),
                     MPI_CHAR,
                     node,
                     MPI_ANY_TAG,
@@ -242,8 +208,8 @@ void comm::DataWarehouse::syncMessages() {
             sendQueues_[node].pop();
             sendTasks_.emplace_back(sendData);
             MPI_Isend(
-                    sendData->buffer.data(),
-                    (int)sendData->buffer.size(),
+                    sendData->commPacket->serializedData.data(),
+                    (int)sendData->commPacket->serializedData.size(),
                     MPI_CHAR,
                     node,
                     nodeId_,
@@ -270,13 +236,7 @@ void comm::DataWarehouse::processSendsAndRecvs() {
     for(auto recvData = recvTasks_.begin(); recvData != recvTasks_.end();) {
         MPI_Test(&(*recvData)->request, &flag, &status);
         if(flag) {
-            std::shared_ptr<RecvData> data = *recvData;
-            std::istringstream iss(data->buffer);
-            comm::Communicator::signal.emit(std::make_shared<comm::CommPacket>(
-                    data->id,
-                    std::move(data->buffer),
-                    data->srcId
-            ));
+            comm::Communicator::signal.emit(std::move((*recvData)->commPacket));
             recvData = recvTasks_.erase(recvData);
         }
     }
@@ -288,9 +248,10 @@ comm::DataWarehouse::~DataWarehouse() {
 
 void comm::DataWarehouse::sendMessage(uint32_t id, std::string &&message, int32_t destId) {
     std::lock_guard lg(mutex_);
-    sendQueues_[destId].emplace(std::make_shared<SendData>(
+    sendQueues_[destId].emplace(std::make_shared<CommPacketMPIWrapper>(
             id,
             std::move(message),
+            destId,
             MPI_Request()
     ));
 }

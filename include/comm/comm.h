@@ -40,23 +40,23 @@ namespace comm {
     struct CommPacket {
         uint32_t id;
         std::string serializedData;
-        uint32_t srcId;
+        uint32_t otherNode;
 
-        explicit CommPacket(uint32_t id_, std::string &&serializedData_, uint32_t srcId_)
-                : id(id_), serializedData(serializedData_), srcId(srcId_) {}
+        explicit CommPacket(uint32_t id_, std::string &&serializedData_, uint32_t otherNode_)
+                : id(id_), serializedData(serializedData_), otherNode(otherNode_) {}
 
         CommPacket(CommPacket &&other) noexcept {
             if(this == &other) return;
             this->id = other.id;
             this->serializedData = std::move(other.serializedData);
-            this->srcId = other.srcId;
+            this->otherNode = other.otherNode;
         }
 
         CommPacket& operator=(CommPacket &&other) noexcept {
             if(this == &other) return *this;
             this->id = other.id;
             this->serializedData = std::move(other.serializedData);
-            this->srcId = other.srcId;
+            this->otherNode = other.otherNode;
 
             return *this;
         }
