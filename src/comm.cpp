@@ -67,6 +67,7 @@ namespace comm {
         std::mutex mutex_{};
         std::thread daemonThread_;
         std::atomic_int32_t stopDaemon_ = false;
+        std::chrono::milliseconds daemonTimeSlice_ = std::chrono::milliseconds(16);
 
         // send related
         std::vector<std::queue<std::shared_ptr<CommPacketMPIWrapper>>> sendQueues_;
@@ -88,6 +89,7 @@ namespace comm {
     public:
         ~DataWarehouse();
         static DataWarehouse *getInstance();
+        void setDaemonTimeSlice(std::chrono::milliseconds timeSlice);
         void startDaemon();
         void stopDaemon();
         void sendMessage(uint32_t typeId, std::string &&message, int destId);
@@ -142,8 +144,12 @@ void comm::DataWarehouse::daemon() {
             // process sent and received messages
             processSendsAndRecvs();
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(daemonTimeSlice_);
     }
+}
+
+void comm::DataWarehouse::setDaemonTimeSlice(std::chrono::milliseconds daemonTimeSlice) {
+    daemonTimeSlice_ = daemonTimeSlice;
 }
 
 void comm::DataWarehouse::startDaemon() {
@@ -281,7 +287,7 @@ int comm::getMpiNumNodes() {
     return size;
 }
 
-comm::MPI_GlobalLockGuard::MPI_GlobalLockGuard(int32_t *argc, char **argv[]) {
+comm::MPI_GlobalLockGuard::MPI_GlobalLockGuard(int32_t *argc, char **argv[], std::chrono::milliseconds timeSlice) {
     int32_t flag = false;
     if(auto status = MPI_Initialized(&flag); status != MPI_SUCCESS or flag == false) {
         //TODO: Do we need this?
@@ -289,6 +295,7 @@ comm::MPI_GlobalLockGuard::MPI_GlobalLockGuard(int32_t *argc, char **argv[]) {
 //        if(MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided) == MPI_SUCCESS) {
         if(MPI_Init(argc, argv) == MPI_SUCCESS) {
             if(isMpiRootPid()) printf("[MPI_GlobalLockGuard] MPI initialized\n");
+            comm::DataWarehouse::getInstance()->setDaemonTimeSlice(timeSlice);
             comm::DataWarehouse::getInstance()->startDaemon();
         }
     }

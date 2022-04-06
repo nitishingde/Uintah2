@@ -2,6 +2,7 @@
 #define UINTAH2_COMM_H
 
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -27,7 +28,11 @@ namespace comm {
      */
     class MPI_GlobalLockGuard {
     public:
-        MPI_GlobalLockGuard(int32_t *argc, char ***argv);
+        MPI_GlobalLockGuard(
+            int32_t *argc,
+            char ***argv,
+            std::chrono::milliseconds timeSlice = std::chrono::milliseconds(16)
+        );
         ~MPI_GlobalLockGuard();
     };
 
