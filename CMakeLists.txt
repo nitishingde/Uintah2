@@ -26,3 +26,9 @@ target_link_libraries(comm_test
     PUBLIC
         comm
 )
+
+add_executable(comm_benchmark benchmark.cpp)
+target_link_libraries(comm_benchmark
+    PUBLIC
+        comm
+)
