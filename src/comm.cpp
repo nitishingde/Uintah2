@@ -315,6 +315,10 @@ void comm::DataWarehouse::sendMessage(uint32_t id, std::string &&message, int32_
     ));
 }
 
+void comm::setDaemonTimeSlice(std::chrono::milliseconds timeSlice) {
+    DataWarehouse::getInstance()->setDaemonTimeSlice(timeSlice);
+}
+
 static int32_t mpiNodeId = -1;
 int comm::getMpiNodeId() {
     return mpiNodeId;
@@ -329,7 +333,7 @@ bool comm::isMpiRootPid() {
     return mpiNodeId == 0;
 }
 
-comm_::MPI_GlobalLockGuard::MPI_GlobalLockGuard(int32_t *argc, char **argv[], std::chrono::milliseconds timeSlice) {
+comm_::MPI_GlobalLockGuard::MPI_GlobalLockGuard(int32_t *argc, char **argv[]) {
     int32_t flag = false;
     if(auto status = MPI_Initialized(&flag); status != MPI_SUCCESS or flag == false) {
         //TODO: Do we need this?
@@ -341,7 +345,6 @@ comm_::MPI_GlobalLockGuard::MPI_GlobalLockGuard(int32_t *argc, char **argv[], st
                 MPI_Comm_size(MPI_COMM_WORLD, &mpiNumNodes);
             }
             if(comm::isMpiRootPid()) printf("[MPI_GlobalLockGuard] MPI initialized\n");
-            comm::DataWarehouse::getInstance()->setDaemonTimeSlice(timeSlice);
             comm::DataWarehouse::getInstance()->startDaemon();
         }
     }

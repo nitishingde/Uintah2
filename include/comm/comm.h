@@ -20,11 +20,7 @@ namespace comm_ {
      */
     class MPI_GlobalLockGuard {
     public:
-        MPI_GlobalLockGuard(
-                int32_t *argc,
-                char ***argv,
-                std::chrono::milliseconds timeSlice = std::chrono::milliseconds(16)
-        );
+        MPI_GlobalLockGuard(int32_t *argc, char ***argv);
         ~MPI_GlobalLockGuard();
     };
 
@@ -69,6 +65,7 @@ namespace comm {
      * TODO: check if thread safe routines
      * TODO: broadcast, reduction
      */
+    void setDaemonTimeSlice(std::chrono::milliseconds timeSlice);
     int getMpiNodeId();
     int getMpiNumNodes();
     bool isMpiRootPid();

@@ -47,7 +47,8 @@ public:
  */
 int main(int argc, char* argv[]) {
     using namespace std::chrono_literals;
-    comm::MPI_GlobalLockGuard globalLockGuard(&argc, &argv, 10ms);
+    comm::MPI_GlobalLockGuard globalLockGuard(&argc, &argv);
+    comm::setDaemonTimeSlice(10ms);
 
     auto nodeId = comm::getMpiNodeId();
     auto numNodes = comm::getMpiNumNodes();
