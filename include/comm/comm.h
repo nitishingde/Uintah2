@@ -15,9 +15,9 @@ namespace comm {
      * TODO: All thread safe I think, need to confirm
      * @return
      */
-    bool isMpiRootPid();
     int getMpiNodeId();
     int getMpiNumNodes();
+    bool isMpiRootPid();
 
     /**
      * RAII

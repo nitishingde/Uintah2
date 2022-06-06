@@ -262,29 +262,18 @@ void comm::DataWarehouse::sendMessage(uint32_t id, std::string &&message, int32_
     ));
 }
 
-static int32_t sIsMpiRootPid = -1;
-bool comm::isMpiRootPid() {
-    if (sIsMpiRootPid == -1) {
-        int32_t flag = false;
-        if (auto status = MPI_Initialized(&flag); status == MPI_SUCCESS and flag) {
-            int32_t processId;
-            MPI_Comm_rank(MPI_COMM_WORLD, &processId);
-            sIsMpiRootPid = (processId == 0);
-        }
-    }
-    return sIsMpiRootPid;
-}
-
+static int32_t mpiNodeId = -1;
 int comm::getMpiNodeId() {
-    int rank;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    return rank;
+    return mpiNodeId;
 }
 
+static int32_t mpiNumNodes = -1;
 int comm::getMpiNumNodes() {
-    int size;
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-    return size;
+    return mpiNumNodes;
+}
+
+bool comm::isMpiRootPid() {
+    return mpiNodeId == 0;
 }
 
 comm::MPI_GlobalLockGuard::MPI_GlobalLockGuard(int32_t *argc, char **argv[], std::chrono::milliseconds timeSlice) {
@@ -294,6 +283,10 @@ comm::MPI_GlobalLockGuard::MPI_GlobalLockGuard(int32_t *argc, char **argv[], std
 //        int32_t provided;
 //        if(MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided) == MPI_SUCCESS) {
         if(MPI_Init(argc, argv) == MPI_SUCCESS) {
+            if (auto status = MPI_Initialized(&flag); status == MPI_SUCCESS and flag) {
+                MPI_Comm_rank(MPI_COMM_WORLD, &mpiNodeId);
+                MPI_Comm_size(MPI_COMM_WORLD, &mpiNumNodes);
+            }
             if(isMpiRootPid()) printf("[MPI_GlobalLockGuard] MPI initialized\n");
             comm::DataWarehouse::getInstance()->setDaemonTimeSlice(timeSlice);
             comm::DataWarehouse::getInstance()->startDaemon();
