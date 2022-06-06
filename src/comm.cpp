@@ -10,6 +10,59 @@
 #include <thread>
 
 namespace comm {
+    /**
+     * Simple/dumb signal slot implementation intended just for Comm
+     * Only 1 slot can be connected/registered
+     * Connecting multiple slots throws an error
+     * Thread safe routines
+     *
+     * FIXME: use unique_ptr instead of shared_ptr?
+    */
+    class Signal {
+    private:
+        std::function<void(SignalType)> slot_;
+        std::mutex mutex_ {};
+
+    public:
+        Signal() = default;
+
+        ~Signal() {
+            disconnect();
+        }
+
+        void connect(std::function<void(SignalType)> slot) {
+            std::lock_guard lockGuard(mutex_);
+            if(slot_ != nullptr) {
+                throw std::runtime_error("[comm::Signal] slot is already occupied!");
+            }
+            slot_ = std::move(slot);
+        }
+
+        template<class T>
+        void connect(void(T::*memberFunction)(SignalType), T *pObject) {
+            connect(std::bind(memberFunction, pObject, std::placeholders::_1));
+        }
+
+        void disconnect() {
+            std::lock_guard lockGuard(mutex_);
+            slot_ = nullptr;
+        }
+
+        void emit(SignalType signal) {
+            std::lock_guard lockGuard(mutex_);
+            if(slot_ == nullptr) {
+                throw std::runtime_error("[comm::Signal] slot is empty!");
+            }
+            slot_(std::move(signal));
+        }
+
+        bool empty() {
+            std::lock_guard lockGuard(mutex_);
+            return slot_ == nullptr;
+        }
+    };
+    static comm::Signal signal {};
+
     struct MetaDatum {
     private:
         uint32_t metaData_[2] = {0};
@@ -242,7 +295,7 @@ void comm::DataWarehouse::processSendsAndRecvs() {
     for(auto recvData = recvTasks_.begin(); recvData != recvTasks_.end();) {
         MPI_Test(&(*recvData)->request, &flag, &status);
         if(flag) {
-            comm::Communicator::signal.emit(std::move((*recvData)->commPacket));
+            comm::signal.emit(std::move((*recvData)->commPacket));
             recvData = recvTasks_.erase(recvData);
         }
     }
@@ -276,7 +329,7 @@ bool comm::isMpiRootPid() {
     return mpiNodeId == 0;
 }
 
-comm::MPI_GlobalLockGuard::MPI_GlobalLockGuard(int32_t *argc, char **argv[], std::chrono::milliseconds timeSlice) {
+comm_::MPI_GlobalLockGuard::MPI_GlobalLockGuard(int32_t *argc, char **argv[], std::chrono::milliseconds timeSlice) {
     int32_t flag = false;
     if(auto status = MPI_Initialized(&flag); status != MPI_SUCCESS or flag == false) {
         //TODO: Do we need this?
@@ -287,26 +340,28 @@ comm::MPI_GlobalLockGuard::MPI_GlobalLockGuard(int32_t *argc, char **argv[], std
                 MPI_Comm_rank(MPI_COMM_WORLD, &mpiNodeId);
                 MPI_Comm_size(MPI_COMM_WORLD, &mpiNumNodes);
             }
-            if(isMpiRootPid()) printf("[MPI_GlobalLockGuard] MPI initialized\n");
+            if(comm::isMpiRootPid()) printf("[MPI_GlobalLockGuard] MPI initialized\n");
             comm::DataWarehouse::getInstance()->setDaemonTimeSlice(timeSlice);
             comm::DataWarehouse::getInstance()->startDaemon();
         }
     }
 }
 
-comm::MPI_GlobalLockGuard::~MPI_GlobalLockGuard() {
+comm_::MPI_GlobalLockGuard::~MPI_GlobalLockGuard() {
     int32_t flag = false;
     if(auto status = MPI_Initialized(&flag); status == MPI_SUCCESS and flag) {
         comm::DataWarehouse::getInstance()->stopDaemon();
         if(MPI_Finalize() == MPI_SUCCESS) {
-            if(isMpiRootPid()) printf("[MPI_GlobalLockGuard] MPI exited\n");
+            if(comm::isMpiRootPid()) printf("[MPI_GlobalLockGuard] MPI exited\n");
             delete comm::DataWarehouse::getInstance();
         }
     }
 }
 
-void comm::Communicator::sendMessage(uint32_t id, std::string &&message, int32_t destId) {
+void comm::sendMessage(uint32_t id, std::string &&message, int32_t destId) {
     comm::DataWarehouse::getInstance()->sendMessage(id, std::move(message), destId);
 }
 
-comm::Signal comm::Communicator::signal {};
+void comm::connectReceiver(std::function<void(SignalType)> slot) {
+    comm::signal.connect(slot);
+}
