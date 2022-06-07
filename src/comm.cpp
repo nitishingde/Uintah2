@@ -9,6 +9,11 @@
 #include <queue>
 #include <thread>
 
+
+bool mpiGlobalLockGuardInitialized = false;
+int32_t mpiNodeId = -1;
+int32_t mpiNumNodes = -1;
+
 namespace comm {
     /**
      * Simple/dumb signal slot implementation intended just for Comm
@@ -305,6 +310,19 @@ comm::DataWarehouse::~DataWarehouse() {
     pDataWarehouse = nullptr;
 }
 
+void verifyCommInitialization() {
+    if(!mpiGlobalLockGuardInitialized) {
+        throw std::runtime_error(
+            "Declare comm::CommLockGuard RAII object on stack, in main (or lifetime of application), to initialize comm library\n"
+            "Usage:\n\n"
+            "int main(int argc, char *argv[]) {\n"
+            "\tcomm::CommLockGuard commLockGuard(&argc, &argv);\n"
+            "\t// Do stuff...\n"
+            "}"
+        );
+    }
+}
+
 void comm::DataWarehouse::sendMessage(uint32_t id, std::string &&message, int32_t destId) {
     std::lock_guard lg(mutex_);
     sendQueues_[destId].emplace(std::make_shared<CommPacketMPIWrapper>(
@@ -316,20 +334,22 @@ void comm::DataWarehouse::sendMessage(uint32_t id, std::string &&message, int32_
 }
 
 void comm::setDaemonTimeSlice(std::chrono::milliseconds timeSlice) {
+    verifyCommInitialization();
     DataWarehouse::getInstance()->setDaemonTimeSlice(timeSlice);
 }
 
-static int32_t mpiNodeId = -1;
 int comm::getMpiNodeId() {
+    verifyCommInitialization();
     return mpiNodeId;
 }
 
-static int32_t mpiNumNodes = -1;
 int comm::getMpiNumNodes() {
+    verifyCommInitialization();
     return mpiNumNodes;
 }
 
 bool comm::isMpiRootPid() {
+    verifyCommInitialization();
     return mpiNodeId == 0;
 }
 
@@ -343,8 +363,11 @@ comm_::MPI_GlobalLockGuard::MPI_GlobalLockGuard(int32_t *argc, char **argv[]) {
             if (auto status = MPI_Initialized(&flag); status == MPI_SUCCESS and flag) {
                 MPI_Comm_rank(MPI_COMM_WORLD, &mpiNodeId);
                 MPI_Comm_size(MPI_COMM_WORLD, &mpiNumNodes);
+                mpiGlobalLockGuardInitialized = true;
             }
-            if(comm::isMpiRootPid()) printf("[MPI_GlobalLockGuard] MPI initialized\n");
+#if not NDEBUG
+            if(comm::isMpiRootPid()) printf("[CommLockGuard] MPI initialized\n");
+#endif
             comm::DataWarehouse::getInstance()->startDaemon();
         }
     }
@@ -355,16 +378,21 @@ comm_::MPI_GlobalLockGuard::~MPI_GlobalLockGuard() {
     if(auto status = MPI_Initialized(&flag); status == MPI_SUCCESS and flag) {
         comm::DataWarehouse::getInstance()->stopDaemon();
         if(MPI_Finalize() == MPI_SUCCESS) {
-            if(comm::isMpiRootPid()) printf("[MPI_GlobalLockGuard] MPI exited\n");
+#if not NDEBUG
+            if(comm::isMpiRootPid()) printf("[CommLockGuard] MPI exited\n");
+#endif
+            mpiGlobalLockGuardInitialized = false;
             delete comm::DataWarehouse::getInstance();
         }
     }
 }
 
 void comm::sendMessage(uint32_t id, std::string &&message, int32_t destId) {
+    verifyCommInitialization();
     comm::DataWarehouse::getInstance()->sendMessage(id, std::move(message), destId);
 }
 
 void comm::connectReceiver(std::function<void(SignalType)> slot) {
+    verifyCommInitialization();
     comm::signal.connect(slot);
 }
