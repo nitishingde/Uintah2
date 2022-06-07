@@ -57,7 +57,7 @@ namespace comm_ {
 }
 
 namespace comm {
-    using MPI_GlobalLockGuard = comm_::MPI_GlobalLockGuard;
+    using CommLockGuard = comm_::MPI_GlobalLockGuard;
     using CommPacket = comm_::CommPacket;
     using SignalType = std::shared_ptr<comm::CommPacket>;
 
