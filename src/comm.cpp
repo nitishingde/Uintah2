@@ -307,6 +307,7 @@ void comm::DataWarehouse::processSendsAndRecvs() {
 }
 
 comm::DataWarehouse::~DataWarehouse() {
+    MPI_Win_free(&recvMetadataWindow);
     pDataWarehouse = nullptr;
 }
 
@@ -377,12 +378,12 @@ comm_::MPI_GlobalLockGuard::~MPI_GlobalLockGuard() {
     int32_t flag = false;
     if(auto status = MPI_Initialized(&flag); status == MPI_SUCCESS and flag) {
         comm::DataWarehouse::getInstance()->stopDaemon();
+        delete comm::DataWarehouse::getInstance();
         if(MPI_Finalize() == MPI_SUCCESS) {
 #if not NDEBUG
             if(comm::isMpiRootPid()) printf("[CommLockGuard] MPI exited\n");
 #endif
             mpiGlobalLockGuardInitialized = false;
-            delete comm::DataWarehouse::getInstance();
         }
     }
 }
