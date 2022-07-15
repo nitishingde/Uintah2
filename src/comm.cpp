@@ -37,9 +37,10 @@ namespace comm {
 
         void connect(std::function<void(SignalType)> slot) {
             std::lock_guard lockGuard(mutex_);
-            if(slot_ != nullptr) {
-                throw std::runtime_error("[comm::Signal] slot is already occupied!");
-            }
+//            FIXME?
+//            if(slot_ != nullptr) {
+//                throw std::runtime_error("[comm::Signal] slot is already occupied!");
+//            }
             slot_ = std::move(slot);
         }
 
