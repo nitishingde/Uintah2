@@ -65,6 +65,7 @@ namespace comm {
      * TODO: check if thread safe routines
      * TODO: broadcast, reduction
      */
+    bool isInitialized();
     void setDaemonTimeSlice(std::chrono::milliseconds timeSlice);
     int getMpiNodeId();
     int getMpiNumNodes();

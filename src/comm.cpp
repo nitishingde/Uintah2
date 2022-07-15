@@ -335,6 +335,10 @@ void comm::DataWarehouse::sendMessage(uint32_t id, std::string &&message, int32_
     ));
 }
 
+bool comm::isInitialized() {
+    return mpiGlobalLockGuardInitialized;
+}
+
 void comm::setDaemonTimeSlice(std::chrono::milliseconds timeSlice) {
     verifyCommInitialization();
     DataWarehouse::getInstance()->setDaemonTimeSlice(timeSlice);
