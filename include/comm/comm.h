@@ -67,6 +67,7 @@ namespace comm {
      */
     bool isInitialized();
     void setDaemonTimeSlice(std::chrono::milliseconds timeSlice);
+    void stopDaemon();
     int getMpiNodeId();
     int getMpiNumNodes();
     bool isMpiRootPid();
@@ -76,6 +77,7 @@ namespace comm {
     void connectReceiver(void(T::*memberFunction)(SignalType), T *pObject) {
         connectReceiver(std::bind(memberFunction, pObject, std::placeholders::_1));
     }
+    void barrier();
 }
 
 

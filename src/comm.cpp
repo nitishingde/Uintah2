@@ -125,7 +125,9 @@ namespace comm {
         int32_t nodeId_;
         std::mutex mutex_{};
         std::thread daemonThread_;
-        std::atomic_int32_t stopDaemon_ = false;
+        std::atomic_int32_t myVote_ = false;
+        std::atomic_bool stopDaemon_ = false;
+        std::atomic_bool barrier_ = false;
         std::chrono::milliseconds daemonTimeSlice_ = std::chrono::milliseconds(16);
 
         // send related
@@ -145,12 +147,16 @@ namespace comm {
         void syncMetadata();
         void syncMessages();
         void processSendsAndRecvs();
+        void castVote();
+        void resetVote();
     public:
         ~DataWarehouse();
         static DataWarehouse *getInstance();
         void setDaemonTimeSlice(std::chrono::milliseconds timeSlice);
         void startDaemon();
         void stopDaemon();
+        void setBarrier();
+        bool isBarrierUp();
         void sendMessage(uint32_t typeId, std::string &&message, int destId);
     };
 }
@@ -187,11 +193,19 @@ void comm::DataWarehouse::init() {
 
 void comm::DataWarehouse::daemon() {
     while(true) {
-        int32_t exitVote = 0;
-        MPI_Allreduce(&stopDaemon_, &exitVote, 1, MPI_INT32_T, MPI_SUM, MPI_COMM_WORLD);
-        if(exitVote == numNodes_) {// all MPI processes agree to exit
-            return;
+        // FIXME: myVote_ is used for both daemon and barrier functionalities, can cause problems later
+        int32_t voteCount = 0;
+        MPI_Allreduce(&myVote_, &voteCount, 1, MPI_INT32_T, MPI_SUM, MPI_COMM_WORLD);
+        if(voteCount == numNodes_) {
+            this->resetVote();
+            if(barrier_.load()) {
+                barrier_.store(false);
+            }
+            if(stopDaemon_.load()) {
+                return;
+            }
         }
+
         /*SCOPED*/{
             std::lock_guard lc(this->mutex_);
             // send metadata
@@ -212,13 +226,25 @@ void comm::DataWarehouse::setDaemonTimeSlice(std::chrono::milliseconds daemonTim
 }
 
 void comm::DataWarehouse::startDaemon() {
-    stopDaemon_ = false;
+    stopDaemon_.store(false);
     daemonThread_ = std::thread(&comm::DataWarehouse::daemon, this);
 }
 
 void comm::DataWarehouse::stopDaemon() {
-    stopDaemon_ = true;
-    daemonThread_.join();
+    stopDaemon_.store(true);
+    this->castVote();
+    if(daemonThread_.joinable()) {
+        daemonThread_.join();
+    }
+}
+
+void comm::DataWarehouse::setBarrier() {
+    barrier_.store(true);
+    this->castVote();
+}
+
+bool comm::DataWarehouse::isBarrierUp() {
+    return barrier_.load();
 }
 
 void comm::DataWarehouse::syncMetadata() {
@@ -307,6 +333,14 @@ void comm::DataWarehouse::processSendsAndRecvs() {
     }
 }
 
+void comm::DataWarehouse::castVote() {
+    myVote_.store(true);
+}
+
+void comm::DataWarehouse::resetVote() {
+    myVote_.store(false);
+}
+
 comm::DataWarehouse::~DataWarehouse() {
     MPI_Win_free(&recvMetadataWindow);
     pDataWarehouse = nullptr;
@@ -342,6 +376,10 @@ bool comm::isInitialized() {
 void comm::setDaemonTimeSlice(std::chrono::milliseconds timeSlice) {
     verifyCommInitialization();
     DataWarehouse::getInstance()->setDaemonTimeSlice(timeSlice);
+}
+
+void comm::stopDaemon() {
+    DataWarehouse::getInstance()->stopDaemon();
 }
 
 int comm::getMpiNodeId() {
@@ -401,4 +439,9 @@ void comm::sendMessage(uint32_t id, std::string &&message, int32_t destId) {
 void comm::connectReceiver(std::function<void(SignalType)> slot) {
     verifyCommInitialization();
     comm::signal.connect(slot);
+}
+
+void comm::barrier() {
+    comm::DataWarehouse::getInstance()->setBarrier();
+    while(comm::DataWarehouse::getInstance()->isBarrierUp());
 }
