@@ -67,8 +67,22 @@ int main(int argc, char* argv[]) {
     auto send = CommData("nodeId" + std::to_string(nodeId), nodeId);
     comm::sendMessage(typeid(CommData).hash_code(),  send.serialize(), destId);
     printf("[Process %d] %d --> %d\n", nodeId, nodeId, destId);
-
+    fflush(stdout);
     while(!std::atomic_load(&canExit)) {}
+
+    comm::barrier();
+    if(comm::isMpiRootPid()) printf("\n<<< New Sends/Recvs >>>\n\n");
+    fflush(stdout);
+    comm::barrier();
+
+    canExit = false;
+    send = CommData("NewNodeId" + std::to_string(nodeId), nodeId);
+    comm::sendMessage(typeid(CommData).hash_code(),  send.serialize(), destId);
+    printf("[Process %d] %d --> %d\n", nodeId, nodeId, destId);
+    while(!std::atomic_load(&canExit)) {}
+
+    // this is called automatically by comm lock guard, but we can call it specifically as well
+    comm::stopDaemon();
 
     return EXIT_SUCCESS;
 }
